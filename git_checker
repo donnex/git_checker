@@ -1,0 +1,104 @@
+#!/usr/bin/env python
+import sh
+import sys
+import os
+from optparse import OptionParser
+from datetime import datetime
+
+
+class GitChecker(object):
+    def __init__(self, git_dir, auto_commit, keychain_file, quiet):
+        self.git_dir = git_dir
+        self.auto_commit = auto_commit
+        self.keychain_file = keychain_file
+        self.quiet = quiet
+
+    def check(self):
+        sh.cd(self.git_dir)
+        self.git_status = sh.git.status()
+
+        # Changes in repo
+        if 'Changes not staged for commit' in self.git_status:
+            self.status_output('Changes in repository')
+            if self.auto_commit:
+                self.commit()
+                self.push()
+        # Files added to commit but not commited
+        elif 'Changes to be committed' in self.git_status:
+            self.status_output('Files added to commit but not commited')
+        # Files not added to repo
+        elif 'Untracked files' in self.git_status:
+            self.status_output('Untracked files')
+        # Files not pushed to remote
+        elif 'Your branch is ahead of' in self.git_status:
+            self.status_output('Not pushed to remote')
+            if self.auto_commit:
+                self.push()
+        # Clean
+        elif ('nothing to commit, working directory clean' in self.git_status or
+                'nothing to commit (working directory clean)' in self.git_status):
+            sys.exit()
+        # Unknown status
+        else:
+            self.status_output('Unknown git status')
+
+    def commit(self):
+        git_commit = sh.git.commit('-a', '-m', 'Auto commit %s' %
+                            (datetime.now().replace(microsecond=0),))
+        print '\nAuto commited:\n%s' % (git_commit.strip(),)
+
+    def push(self):
+        env = os.environ.copy()
+        for env_var in open(self.keychain_file, 'r').read().split(';'):
+            env_var = env_var.strip()
+            if '=' in env_var:
+                var, value = env_var.split('=')
+                env[var] = value
+
+        try:
+            git_push = sh.git.push('--porcelain', _env=env)
+        except sh.ErrorReturnCode, e:
+            print '\nAuto pushed to remote failed:\n%s\n\n%s' % (e.stdout.strip(),
+                                                             e.stderr.strip())
+        else:
+            print '\nAuto pushed to remote:\n%s' % (git_push.strip(),)
+
+    def status_output(self, status):
+        if self.quiet:
+            sys.exit(1)
+        else:
+            print('Git status %s %s:\n%s\n\n%s' % (sh.hostname().strip(),
+                                                   self.git_dir, status,
+                                                   self.git_status.strip()))
+
+
+if __name__ == '__main__':
+    usage = 'Usage: %prog [-a] [-k keychainfile] [-q] gitdir'
+    parser = OptionParser(usage)
+    parser.add_option('-a', '--autocommit', action='store_true',
+                                        dest='auto_commit',
+                                        help='auto commit the git repo')
+    parser.add_option('-k', '--keychainfile', action='store',
+                                        type='string',
+                                        dest='keychain_file',
+                                        help='SSH keychain file for auto commits')
+    parser.add_option('-q', '--quiet', action='store_true',
+                                        dest='quiet',
+                                        help='Don\'t output anything. Only exit with 0 if everything is clean and 1 otherwise. Can\'t be used together with auto commit.')
+    (options, args) = parser.parse_args()
+    if len(args) != 1:
+        parser.error('Missing git dir')
+
+    git_dir = args[0]
+    keychain_file = options.keychain_file
+    if options.auto_commit and not options.keychain_file:
+        parser.error('Keychain file must be set if autocommit is enabled')
+    elif not os.path.isdir(git_dir):
+        parser.error('%s is not a dir' % (git_dir,))
+    elif not os.path.isdir(os.path.join(git_dir, '.git')):
+        parser.error('%s is not a git repo' % (git_dir,))
+    elif keychain_file and not os.path.isfile(keychain_file):
+        parser.error('%s is not a file' % (keychain_file,))
+
+    git_checker = GitChecker(git_dir, options.auto_commit, keychain_file, options.quiet)
+    git_checker.check()
