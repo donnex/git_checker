@@ -5,6 +5,10 @@ import os
 from optparse import OptionParser
 from datetime import datetime
 
+CLEAN_PHRASES = ('nothing to commit, working directory clean',
+                 'nothing to commit (working directory clean)',
+                 'nothing to commit, working tree clean')
+
 
 class GitChecker(object):
     def __init__(self, git_dir, auto_commit, keychain_file, quiet):
@@ -35,8 +39,7 @@ class GitChecker(object):
             if self.auto_commit:
                 self.push()
         # Clean
-        elif ('nothing to commit, working directory clean' in self.git_status or
-                'nothing to commit (working directory clean)' in self.git_status):
+        elif self.repo_clean():
             sys.exit()
         # Unknown status
         else:
@@ -70,6 +73,15 @@ class GitChecker(object):
             print('Git status %s %s:\n%s\n\n%s' % (sh.hostname().strip(),
                                                    self.git_dir, status,
                                                    self.git_status.strip()))
+
+    def repo_clean(self):
+        """Return True if repo is clean, otherwise False."""
+
+        for clean_phrase in CLEAN_PHRASES:
+            if clean_phrase in self.git_status:
+                return True
+
+        return False
 
 
 if __name__ == '__main__':
